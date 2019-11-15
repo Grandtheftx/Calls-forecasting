@@ -1,0 +1,160 @@
+import scipy
+print('scipy: %s' % scipy.__version__)
+# numpy
+import numpy
+print('numpy: %s' % numpy.__version__)
+# matplotlib
+import matplotlib
+print('matplotlib: %s' % matplotlib.__version__)
+# pandas
+import pandas
+print('pandas: %s' % pandas.__version__)
+# scikit-learn
+import sklearn
+print('sklearn: %s' % sklearn.__version__)
+# statsmodels
+import statsmodels
+print('statsmodels: %s' % statsmodels.__version__)
+
+
+import pandas as pd
+# Беру исходные данные
+series = pd.read_excel(r'C:\Users\Granin-ia\Desktop\Звонки\november\Calls7\Calls7.xlsx', header=0, index_col=0)
+#series.head(2)
+# Делю их на 2 списка: обучающий и проверочный
+split_point = len(series) - 72
+dataset, validation = series[0:split_point], series[split_point:]
+print('Dataset %d, Validation %d' % (len(dataset), len(validation)))
+dataset.to_excel(r'C:\Users\Granin-ia\Desktop\Звонки\november\Calls7\dataset.xlsx', index=False)
+validation.to_excel(r'C:\Users\Granin-ia\Desktop\Звонки\november\Calls7\validation.xlsx', index=False)
+
+# prepare data
+X = series.values
+X = X.astype('float32')
+train_size = int(len(X) * 0.50)
+train, test = X[0:train_size], X[train_size:]
+# series.head(2)
+
+# На основании обучающего списка с поступившими звонками подбирается самая удачная комбинация коэфициентов модели с самой низкой RMSE
+import warnings
+from pandas import read_csv
+from statsmodels.tsa.arima_model import ARIMA
+from sklearn.metrics import mean_squared_error
+from math import sqrt
+def evaluate_arima_model(X, arima_order):
+    # prepare training dataset
+    X = X.astype('float32')
+    train_size = int(len(X) * 0.50)
+    train, test = X[0:train_size], X[train_size:]
+    history = [x for x in train]
+    # make predictions
+    predictions = list()
+    for t in range(len(test)):
+        model = ARIMA(history, order=arima_order)
+        # model_fit = model.fit(disp=0)
+        model_fit = model.fit(trend='nc', disp=0)
+        yhat = model_fit.forecast()[0]
+        predictions.append(yhat)
+        history.append(test[t])
+    # calculate out of sample error
+    mse = mean_squared_error(test, predictions)
+    rmse = sqrt(mse)
+    return rmse 
+# evaluate combinations of p, d and q values for an ARIMA model
+def evaluate_models(dataset, p_values, d_values, q_values):
+    dataset = dataset.astype('float32')
+    best_score, best_cfg = float("inf"), None
+    for p in p_values:
+        for d in d_values:
+            for q in q_values:
+                order = (p,d,q)
+                try:
+                    mse = evaluate_arima_model(dataset, order)
+                    if mse < best_score:
+                        best_score, best_cfg = mse, order
+                    print('ARIMA%s RMSE=%.3f' % (order,mse))
+                except:
+                    continue
+    print('Best ARIMA%s RMSE=%.3f' % (best_cfg, best_score))
+# load dataset
+series = pd.read_excel(r'C:\Users\Granin-ia\Desktop\Звонки\november\Calls7\Calls7.xlsx', header=0, index_col=0)
+# evaluate parameters
+p_values = range(0, 5)
+d_values = range(0, 3)
+q_values = range(0, 5)
+warnings.filterwarnings("ignore")
+evaluate_models(series.values, p_values, d_values, q_values)
+print('Best ARIMA%s RMSE=%.3f' % (best_cfg, best_score))
+
+# Save model
+# model.pkl This is the ARIMAResult object from the call to ARIMA.fit(). 
+# This includes the coefficients and all other internal data returned when fitting the model.
+# model_bias.npy This is the bias value stored as a one-row, one-column NumPy array.
+import pandas as pd
+from pandas import read_csv
+from statsmodels.tsa.arima_model import ARIMA
+from scipy.stats import boxcox
+import numpy
+ 
+# monkey patch around bug in ARIMA class
+def __getnewargs__(self):
+    return ((self.endog),(self.k_lags, self.k_diff, self.k_ma))
+ 
+ARIMA.__getnewargs__ = __getnewargs__
+ 
+# load data
+series = pd.read_excel(r'C:\Users\Granin-ia\Desktop\Звонки\november\Calls7\Calls7.xlsx', header=0, index_col=0)
+# prepare data
+X = series.values
+X = X.astype('float32')
+# fit model
+model = ARIMA(X, order=(1, 0, 3))
+model_fit = model.fit(trend='nc', disp=0)
+# bias constant, could be calculated from in-sample mean residual
+bias = 1.081624
+# save model
+model_fit.save(r'C:\Users\Granin-ia\Desktop\Звонки\november\Calls7\model7.pkl')
+numpy.save(r'C:\Users\Granin-ia\Desktop\Звонки\november\Calls7\model_bias7.npy', [bias])
+print('Fit for Calls7.xlsx is ready')
+
+# Сам прогноз, длина прогноза = равна длине валидационного списка
+from pandas import read_csv
+from matplotlib import pyplot
+from statsmodels.tsa.arima_model import ARIMA
+from statsmodels.tsa.arima_model import ARIMAResults
+from sklearn.metrics import mean_squared_error
+from math import sqrt
+import numpy
+# load and prepare datasets
+dataset = pd.read_excel(r'C:\Users\Granin-ia\Desktop\Звонки\november\Calls7\dataset.xlsx')
+X = dataset.values.astype('float32')
+history = [x for x in X]
+validation = pd.read_excel(r'C:\Users\Granin-ia\Desktop\Звонки\november\Calls7\validation.xlsx')
+y = validation.values.astype('float32')
+# load model
+model_fit = ARIMAResults.load(r'C:\Users\Granin-ia\Desktop\Звонки\november\Calls7\model7.pkl')
+bias = numpy.load(r'C:\Users\Granin-ia\Desktop\Звонки\november\Calls7\model_bias7.npy')
+# make first prediction
+predictions = list()
+yhat = bias + float(model_fit.forecast()[0])
+predictions.append(yhat)
+history.append(y[0])
+print('>Predicted=%.3f, Expected=%3.f' % (yhat, y[0]))
+# rolling forecasts
+for i in range(1, len(y)):
+    # predict
+    model = ARIMA(history, order=(3,0,0))
+    model_fit = model.fit(trend='nc', disp=0)
+    yhat = bias + float(model_fit.forecast()[0])
+    predictions.append(yhat)
+    # observation
+    obs = y[i]
+    history.append(obs)
+    print('>Predicted=%.3f, Expected=%3.f' % (yhat, obs))
+# report performance
+mse = mean_squared_error(y, predictions)
+rmse = sqrt(mse)
+print('RMSE: %.3f' % rmse)
+pyplot.plot(y)
+pyplot.plot(predictions, color='red')
+pyplot.show()
